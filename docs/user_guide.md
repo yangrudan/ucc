@@ -338,6 +338,55 @@ $ UCC_COLL_TRACE=INFO srun ./c/mpi/collective/osu_allreduce -i 1 -x 0 -d cuda -m
 [1678205653.810705] [node_name:903  :0]        ucc_coll.c:255  UCC_COLL INFO  coll_init: Barrier; CL_BASIC {TL_UCP}, team_id 32768
 ```
 
+## About ucc_collective_triggered_post
+
+relate modules: 
+
+-  TL/CUDA
+-  EC/CUDA
+
+```mermaid
+flowchart TD
+	subgraph trigger_post's main process
+	      A[app Init] --> B[ucc_collective_triggered_post];
+	      B -->C[ucc_triggered_post];
+	      C --> D[ucc_trigger_test into ucc_progress_queue_enqueue];
+	end
+     
+	subgraph queue's main process
+	      A10[app query]  --> A11
+	      A11[ucc_context_progress] --> A1[ucc_progress_queue];
+				A1[ucc_progress_queue] --> B1[ucc_trigger_test]
+        B1 --> B1x[ucc_cuda_executor_start]
+	      B1x --> C1[ucc_cuda_executor_persistent_start]
+        C1 --> C1111{task->status == UCC_OK}
+        C1111 -- yes --> B1y[ucc_task_complete]
+        C1111 -- no --> B1
+				B1y --> D1[callback--ucc_trigger_complete]
+        A1 --> B11[ucc_tl_cuda_alltoallv_ce_progress]
+        B11 --> C11[ucc_tl_cuda_alltoallv_ce_post_copies]
+				C11 --> D11[ucc_ee_executor_task_post]
+        D11 --> E11[executor_ops->task_post] 
+        E11 --> F11[ucc_cuda_executor_persistent_task_post]
+        F11 --> G11{UCC_OK ?}
+        G11 -- yes --> C111
+        G11 -- no --> B11
+        B11 --> C111[ucc_ee_executor_task_test]
+        C111 --> D111[ucc_cuda_executor_persistent_task_test]
+        D111 --> E111[UCC_OK]
+  end
+
+			 D --- A1
+       D2 --- A1
+       D1 --> A2
+
+	subgraph collective's main process
+				A2[callback--ucc_trigger_complete] --> B2[task->post]
+        B2 --> C2[ucc_tl_cuda_alltoallv_ce_start]
+	      C2 --> D2[ucc_progress_queue_enqueue]
+  end
+```
+
 ## Known Issues
 
 - For the CUDA and NCCL TL CUDA device dependent data structures are created when UCC
